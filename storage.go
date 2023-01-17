@@ -42,12 +42,12 @@ func (c *MysqlStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 		case "query_timeout":
 			QueryTimeout, err := strconv.Atoi(value)
 			if err == nil {
-				c.QueryTimeout = time.Duration(QueryTimeout) * time.Second
+				c.QueryTimeout = time.Duration(QueryTimeout)
 			}
 		case "lock_timeout":
 			LockTimeout, err := strconv.Atoi(value)
 			if err == nil {
-				c.LockTimeout = time.Duration(LockTimeout) * time.Second
+				c.LockTimeout = time.Duration(LockTimeout)
 			}
 		case "dsn":
 			c.Dsn = value
