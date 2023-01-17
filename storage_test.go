@@ -25,6 +25,7 @@ func setupWithOptions(t *testing.T) certmagic.Storage {
 	// }
 
 	c := MysqlStorage{}
+
 	c.Dsn = connStr
 	c.QueryTimeout = 10
 	c.LockTimeout = 60
@@ -39,7 +40,6 @@ func setupWithOptions(t *testing.T) certmagic.Storage {
 func TestCaddyMySQLAdapter(t *testing.T) {
 	storage := setup(t)
 
-	// ctx, cancel := context.WithTimeout(caddy.ActiveContext().Context, 1000*time.Second)
 	var ctx = context.Background()
 
 	var testDataSet = []string{"test", "test1", "test2"}
