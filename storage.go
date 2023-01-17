@@ -2,6 +2,7 @@ package storagemysql
 
 import (
 	"context"
+	"crypto/md5"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -41,12 +42,12 @@ func (c *MysqlStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 		case "query_timeout":
 			QueryTimeout, err := strconv.Atoi(value)
 			if err == nil {
-				c.QueryTimeout = time.Duration(QueryTimeout)
+				c.QueryTimeout = time.Duration(QueryTimeout) * time.Second
 			}
 		case "lock_timeout":
 			LockTimeout, err := strconv.Atoi(value)
 			if err == nil {
-				c.LockTimeout = time.Duration(LockTimeout)
+				c.LockTimeout = time.Duration(LockTimeout) * time.Second
 			}
 		case "dsn":
 			c.Dsn = value
@@ -95,8 +96,8 @@ func NewStorage(c MysqlStorage) (certmagic.Storage, error) {
 	}
 	s := &MysqlStorage{
 		Database:     database,
-		QueryTimeout: c.QueryTimeout,
-		LockTimeout:  c.LockTimeout,
+		QueryTimeout: c.QueryTimeout * time.Second,
+		LockTimeout:  c.LockTimeout * time.Second,
 	}
 	return s, s.ensureTableSetup()
 }
@@ -127,15 +128,20 @@ func (s *MysqlStorage) ensureTableSetup() error {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS  `certmagic_data` ( `key` varchar(1024) NOT NULL,`value` BLOB, `modified`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY (`key`))")
+	_, err = tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS  `certmagic_data` (`key_hash` char(40) NOT NULL, `key` TEXT NOT NULL,`value` BLOB, `modified`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  PRIMARY KEY (`key_hash`))")
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS `certmagic_locks` (`key` varchar(1024) NOT NULL,`expires` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY (`key`))")
+	_, err = tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS `certmagic_locks` (`key_hash` char(40) NOT NULL, `key` TEXT NOT NULL,`expires` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  PRIMARY KEY (`key_hash`))")
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func getMD5String(s string) string {
+	md5Code := md5.Sum([]byte(s + "asdfasdfadasdkfjal"))
+	return fmt.Sprintf("%x", md5Code)
 }
 
 // Lock the key and implement certmagic.Storage.Lock.
@@ -153,7 +159,8 @@ func (s *MysqlStorage) Lock(ctx context.Context, key string) error {
 	}
 
 	expires := time.Now().Add(s.LockTimeout)
-	if _, err := tx.ExecContext(ctx, "INSERT INTO certmagic_locks (`key`, `expires`) VALUES (?, ?) ON DUPLICATE KEY UPDATE expires = ?", key, expires, expires); err != nil {
+	key_hash := getMD5String(key)
+	if _, err := tx.ExecContext(ctx, "INSERT INTO certmagic_locks (`key_hash`,`key`, `expires`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE expires = ?", key_hash, key, expires, expires); err != nil {
 		return fmt.Errorf("failed to lock key: %s: %w", key, err)
 	}
 
@@ -164,7 +171,8 @@ func (s *MysqlStorage) Lock(ctx context.Context, key string) error {
 func (s *MysqlStorage) Unlock(ctx context.Context, key string) error {
 	ctx, cancel := context.WithTimeout(ctx, s.QueryTimeout)
 	defer cancel()
-	_, err := s.Database.ExecContext(ctx, "DELETE FROM certmagic_locks WHERE `key` = ?", key)
+	key_hash := getMD5String(key)
+	_, err := s.Database.ExecContext(ctx, "DELETE FROM certmagic_locks WHERE `key_hash` = ?", key_hash)
 	return err
 }
 
@@ -176,7 +184,10 @@ type queryer interface {
 func (s *MysqlStorage) isLocked(queryer queryer, key string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), s.QueryTimeout)
 	defer cancel()
-	row := queryer.QueryRowContext(ctx, "select exists(select 1 from certmagic_locks where `key` = ? and expires > current_timestamp)", key)
+	key_hash := getMD5String(key)
+	current_timestamp := time.Now()
+
+	row := queryer.QueryRowContext(ctx, "select exists(select 1 from certmagic_locks where `key_hash` = ? and expires > ?)", key_hash, current_timestamp)
 	var locked bool
 	if err := row.Scan(&locked); err != nil {
 		return err
@@ -191,7 +202,8 @@ func (s *MysqlStorage) isLocked(queryer queryer, key string) error {
 func (s *MysqlStorage) Store(ctx context.Context, key string, value []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, s.QueryTimeout)
 	defer cancel()
-	_, err := s.Database.ExecContext(ctx, "INSERT INTO certmagic_data (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE  value = ?, modified = current_timestamp", key, value, value)
+	key_hash := getMD5String(key)
+	_, err := s.Database.ExecContext(ctx, "INSERT INTO certmagic_data (`key_hash`, `key`, `value`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE  value = ?, modified = current_timestamp", key_hash, key, value, value)
 	return err
 }
 
@@ -200,7 +212,8 @@ func (s *MysqlStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.QueryTimeout)
 	defer cancel()
 	var value []byte
-	err := s.Database.QueryRowContext(ctx, "SELECT value FROM certmagic_data WHERE `key` = ?", key).Scan(&value)
+	key_hash := getMD5String(key)
+	err := s.Database.QueryRowContext(ctx, "SELECT value FROM certmagic_data WHERE `key_hash` = ?", key_hash).Scan(&value)
 	if err == sql.ErrNoRows {
 		return nil, fs.ErrNotExist
 	}
@@ -213,7 +226,8 @@ func (s *MysqlStorage) Load(ctx context.Context, key string) ([]byte, error) {
 func (s *MysqlStorage) Delete(ctx context.Context, key string) error {
 	ctx, cancel := context.WithTimeout(ctx, s.QueryTimeout)
 	defer cancel()
-	_, err := s.Database.ExecContext(ctx, "DELETE FROM certmagic_data WHERE `key` = ?", key)
+	key_hash := getMD5String(key)
+	_, err := s.Database.ExecContext(ctx, "DELETE FROM certmagic_data WHERE `key_hash` = ?", key_hash)
 	return err
 }
 
@@ -222,7 +236,8 @@ func (s *MysqlStorage) Delete(ctx context.Context, key string) error {
 func (s *MysqlStorage) Exists(ctx context.Context, key string) bool {
 	ctx, cancel := context.WithTimeout(ctx, s.QueryTimeout)
 	defer cancel()
-	row := s.Database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM certmagic_data WHERE `key` = ?)", key)
+	key_hash := getMD5String(key)
+	row := s.Database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM certmagic_data WHERE `key_hash` = ?)", key_hash)
 	var exists bool
 	err := row.Scan(&exists)
 	return err == nil && exists
@@ -261,7 +276,8 @@ func (s *MysqlStorage) Stat(ctx context.Context, key string) (certmagic.KeyInfo,
 	defer cancel()
 	var modified time.Time
 	var size int64
-	row := s.Database.QueryRowContext(ctx, "select length(value), `modified` from certmagic_data where `key` = ?", key)
+	key_hash := getMD5String(key)
+	row := s.Database.QueryRowContext(ctx, "select length(value), `modified` from certmagic_data where `key_hash` = ?", key_hash)
 	err := row.Scan(&size, &modified)
 	if err != nil {
 		return certmagic.KeyInfo{}, err
