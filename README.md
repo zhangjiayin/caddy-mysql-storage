@@ -27,19 +27,6 @@ Now with support for Caddyfile and environment configuration.
 }
 ```
 
-## With vanilla JSON config file and separate fields:
-```json
-{
-	  "storage": {
-		"module": "mysql",
-		"dsn": "caddy_user:caddy_password@tcp(127.0.0.1:3306)/caddy?charset=utf8mb4",
-	  }
-	  "app": {
-	    	...
-	  }
-}
-```
-
 With Caddyfile:
 ```Caddyfile
 # Global Config
@@ -50,13 +37,6 @@ With Caddyfile:
 	}
 }
 
-or 
-
-{
-	storage mysql {
-		dsn caddy_user:caddy_password@tcp(127.0.0.1:3306)/caddy?charset=utf8mb4
-	}
-}
 ```
 
 From Environment:
