@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/caddyserver/caddy/caddyfile"
 	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/certmagic"
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -313,3 +313,15 @@ func (s *MysqlStorage) Stat(ctx context.Context, key string) (certmagic.KeyInfo,
 		IsTerminal: true,
 	}, nil
 }
+
+func (s MysqlStorage) Validate() error {
+	caddy.Log().Named("storage.mysql.sql").Info(fmt.Sprintf("Validate"))
+	return nil
+}
+
+var (
+	_ caddy.Module          = (*MysqlStorage)(nil)
+	_ caddy.Provisioner     = (*MysqlStorage)(nil)
+	_ caddy.Validator       = (*MysqlStorage)(nil)
+	_ caddyfile.Unmarshaler = (*MysqlStorage)(nil)
+)
