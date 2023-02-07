@@ -6,8 +6,7 @@ require github.com/caddyserver/caddy/v2 v2.6.2
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/caddyserver/caddy v1.0.5
-	github.com/caddyserver/certmagic v0.17.2 // indirect
+	github.com/caddyserver/certmagic v0.17.2
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/go-sql-driver/mysql v1.7.0
